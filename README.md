@@ -52,6 +52,7 @@ Train the Qwen-based causal LLM to learn the mapping from text to audio represen
 python train_llm.py \
     --input-dir <input_dir> \
     --save-dir <save_dir> \
+    --pretrained-ckpt-path <optional_llm_ckpt_path> \
     --from-scratch
 ```
 
@@ -60,7 +61,8 @@ Freeze the LLM and train the Vocos decoder to reconstruct the audio from the LLM
 ```bash
 python train_decoder.py \
     --input-dir <input_dir> \
-    --save-dir <save_dir>
+    --save-dir <save_dir> \
+    --llm-ckpt-path <llm_ckpt_path>
 ```
 
 ### 4. Inference

@@ -87,8 +87,6 @@ def generate_audio(text, llm, decoder, tokenizer, device='cuda', save_path="outp
         # print("shape of last layer state is: ", last_layer_state.shape)
         hidden_states_list.append(last_layer_state)
         
-    import pdb;pdb.set_trace()
-
     # Concatenate along time dimension
     # Result: (Batch, T_gen, Dim)
     audio_hidden = torch.stack(hidden_states_list).unsqueeze(0) # (B, T, D)

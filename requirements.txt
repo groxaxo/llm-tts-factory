@@ -1,8 +1,11 @@
 einops
 huggingface_hub
+matplotlib
 numpy
+safetensors
 scipy
 torch
 torchaudio
 tqdm
 transformers
+wandb

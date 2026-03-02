@@ -67,9 +67,6 @@ def main():
         encoder.load_state_dict(encoder_state_dict)
     print("Model loaded.")
 
-    import pdb;pdb.set_trace()
-
-
     print("Reading metadata.")
     files = []
     with open(f'{input_dir}/metadata_orig.csv', encoding='utf-8') as f:
@@ -85,16 +82,12 @@ def main():
 
     print(f'{len(files)} samples located in directory.')
 
-    import pdb;pdb.set_trace()
-
     print("Encoding audio.")
     dataset = []
     for sample in tqdm(files):
         filename, transcript = sample
         # sr, audio = wavfile.read(f'{input_dir}/wavs/{filename}.wav')
         # audio = torch.from_numpy(audio)
-
-        import pdb;pdb.set_trace()
 
         try:
             audio, sr = torchaudio.load(f'{input_dir}/wavs/{filename}.wav')

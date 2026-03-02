@@ -279,8 +279,6 @@ def main():
         collate_fn=lambda texts: collate_dynamic(texts, tokenizer),
     )
 
-    import pdb;pdb.set_trace()
-
     # optimizer
     opt = torch.optim.AdamW(model.parameters(), MAX_LR, betas=BETAS, weight_decay=WEIGHT_DECAY, fused=True)
 

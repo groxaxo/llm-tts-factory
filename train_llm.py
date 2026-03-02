@@ -39,7 +39,7 @@ MIN_LR = 0.3 * MAX_LR
 BATCH_SIZE = 64
 GRAD_ACCUM_STEPS = 1
 SEQ_LEN = 1024
-TEXT_FACTOR = 0.5  # currently does not train on text inputs, you can increase to change this
+TEXT_FACTOR = 0.5
 MAX_STEPS = 150000
 BETAS = (0.9, 0.95)
 WEIGHT_DECAY = 0.1
@@ -86,6 +86,19 @@ def get_args():
         type=str,
         help="Optional safetensors checkpoint path to load after base model initialization."
     )
+    parser.add_argument("--device", type=str, default=DEVICE)
+    parser.add_argument("--max-steps", type=int, default=MAX_STEPS)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--grad-accum-steps", type=int, default=GRAD_ACCUM_STEPS)
+    parser.add_argument("--val-freq", type=int, default=VAL_FREQ)
+    parser.add_argument("--save-freq", type=int, default=SAVE_FREQ)
+    parser.add_argument("--text-factor", type=float, default=TEXT_FACTOR)
+    parser.add_argument("--max-lr", type=float, default=MAX_LR)
+    parser.add_argument("--warmup-ratio", type=float, default=WARMUP_RATIO)
+    parser.add_argument("--cooldown-ratio", type=float, default=COOLDOWN_RATIO)
+    parser.add_argument("--wandb-project", type=str, default=WANDB_PROJECT)
+    parser.add_argument("--train-workers", type=int, default=4)
+    parser.add_argument("--val-workers", type=int, default=2)
     return parser.parse_args()
 
 
@@ -227,7 +240,29 @@ def evaluate(model, val_dataloader, step, device):
 
 
 def main():
+    global DEVICE, MAX_STEPS, BATCH_SIZE, GRAD_ACCUM_STEPS, VAL_FREQ, SAVE_FREQ
+    global TEXT_FACTOR, MAX_LR, WARMUP_RATIO, COOLDOWN_RATIO, MIN_LR
+    global WARMUP_STEPS, COOLDOWN_STEPS, WANDB_PROJECT, PRETRAINED_CKPT_PATH
+
     args = get_args()
+    DEVICE = args.device
+    MAX_STEPS = args.max_steps
+    BATCH_SIZE = args.batch_size
+    GRAD_ACCUM_STEPS = args.grad_accum_steps
+    VAL_FREQ = args.val_freq
+    SAVE_FREQ = args.save_freq
+    TEXT_FACTOR = args.text_factor
+    MAX_LR = args.max_lr
+    WARMUP_RATIO = args.warmup_ratio
+    COOLDOWN_RATIO = args.cooldown_ratio
+    WANDB_PROJECT = args.wandb_project
+    PRETRAINED_CKPT_PATH = args.pretrained_ckpt_path
+    MIN_LR = 0.3 * MAX_LR
+    WARMUP_STEPS = int(MAX_STEPS * WARMUP_RATIO)
+    COOLDOWN_STEPS = int(MAX_STEPS * COOLDOWN_RATIO)
+
+    if args.from_scratch and MAX_STEPS < 50000:
+        print("Warning: from-scratch LLM training with <50k steps usually yields poor speech quality.")
 
     train_dataset_path = f'{args.input_dir}/train.json'
     val_dataset_path = f'{args.input_dir}/val.json'
@@ -256,9 +291,16 @@ def main():
         print("Loading pretrained model weights...")
         model = AutoModelForCausalLM.from_pretrained(args.tokenizer_name)
     
-    if not args.from_scratch and args.pretrained_ckpt_path:
-        state_dict = load_file(args.pretrained_ckpt_path)
-        model.load_state_dict(state_dict)
+    if not args.from_scratch:
+        # CLI-provided checkpoint takes precedence over global PRETRAINED_CKPT_PATH
+        ckpt_to_load = None
+        if getattr(args, 'pretrained_ckpt_path', None):
+            ckpt_to_load = args.pretrained_ckpt_path
+        elif PRETRAINED_CKPT_PATH:
+            ckpt_to_load = PRETRAINED_CKPT_PATH
+        if ckpt_to_load:
+            state_dict = load_file(ckpt_to_load)
+            model.load_state_dict(state_dict)
 
     model.to(DEVICE)
     model.train()
@@ -271,9 +313,9 @@ def main():
         dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=4,
+        num_workers=args.train_workers,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=args.train_workers > 0,
         worker_init_fn=worker_seed_init,
         collate_fn=lambda texts: collate_dynamic(texts, tokenizer),
     )
@@ -284,15 +326,21 @@ def main():
         val_dataset,
         batch_size=BATCH_SIZE,
         shuffle=False,
-        num_workers=2,
+        num_workers=args.val_workers,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=args.val_workers > 0,
         worker_init_fn=worker_seed_init,
         collate_fn=lambda texts: collate_dynamic(texts, tokenizer),
     )
 
     # optimizer
-    opt = torch.optim.AdamW(model.parameters(), MAX_LR, betas=BETAS, weight_decay=WEIGHT_DECAY, fused=True)
+    opt = torch.optim.AdamW(
+        model.parameters(),
+        MAX_LR,
+        betas=BETAS,
+        weight_decay=WEIGHT_DECAY,
+        fused=(device_type == "cuda")
+    )
 
     pbar = tqdm(range(START_STEP, MAX_STEPS), ncols=200, dynamic_ncols=True)
     for step in pbar:
@@ -311,6 +359,7 @@ def main():
         audio_loss_accum = 0.0
         text_loss_accum = 0.0
         acc_accum = 0.0
+        pred_audio_unique = 0
         
         for micro_step in range(GRAD_ACCUM_STEPS):
             try:
@@ -323,6 +372,11 @@ def main():
 
             logits = model(x, attention_mask=attn_mask).logits
             audio_loss, text_loss, acc = compute_loss(x, logits, y, GRAD_ACCUM_STEPS, mask=attn_mask)
+            with torch.no_grad():
+                pred_ids = logits.argmax(dim=-1)
+                audio_positions = (y >= 3) & (y <= 8003) & (attn_mask > 0)
+                if audio_positions.any():
+                    pred_audio_unique = int(torch.unique(pred_ids[audio_positions]).numel())
             
             audio_loss_accum += audio_loss.detach()
             text_loss_accum += text_loss.detach()
@@ -336,20 +390,20 @@ def main():
         for param_group in opt.param_groups:
             param_group['lr'] = lr
         opt.step()
-        torch.cuda.synchronize()
+        torch.cuda.synchronize() if device_type == "cuda" else None
         
-        total_tokens = step * BATCH_SIZE * SEQ_LEN * GRAD_ACCUM_STEPS
         end = time.time()
         dt = (end - start) * 1000
         tokens_per_second = (BATCH_SIZE * SEQ_LEN * GRAD_ACCUM_STEPS) / (end - start)
         
-        tqdm_log = f'text loss: {text_loss_accum.item():.3f} | audio loss: {audio_loss_accum.item():.3f} | acc: {acc_accum.item():.4f} | lr: {lr:.2e} | norm: {norm:.3f} | time: {dt:.2f} ms | {tokens_per_second:.2f} t/s'
+        tqdm_log = f'text loss: {text_loss_accum.item():.3f} | audio loss: {audio_loss_accum.item():.3f} | acc: {acc_accum.item():.4f} | uniq: {pred_audio_unique} | lr: {lr:.2e} | norm: {norm:.3f} | time: {dt:.2f} ms | {tokens_per_second:.2f} t/s'
         pbar.set_description(tqdm_log)
         
         wandb.log({
             "train/text_loss": text_loss_accum.item(),
             "train/audio_loss": audio_loss_accum.item(),
             "train/acc": acc_accum.item(),
+            "train/pred_audio_unique": pred_audio_unique,
             "train/lr": lr,
             "train/grad_norm": norm,
             "train/dt": dt,

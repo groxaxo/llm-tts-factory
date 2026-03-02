@@ -74,3 +74,67 @@ python simple_inference.py \
     --decoder-path <decoder_path> \
     --out simple_inf_out.wav
 ```
+
+### 5. Local Web Demo (5 trabalenguas)
+After training, you can generate five Spanish tongue-twister samples and serve them in a simple local page:
+
+```bash
+mkdir -p web_demo/audio
+CUDA_VISIBLE_DEVICES=0 python simple_inference.py --text "Tres tristes tigres tragan trigo en un trigal de Tristán." --llm-path ./ckpt/llm/checkpoint-2500/model.safetensors --decoder-path ./ckpt/decoder/decoder_trained.pth --out ./web_demo/audio/trabalenguas_01.wav
+```
+
+Then serve the folder:
+
+```bash
+cd web_demo
+python -m http.server 8010
+```
+
+Open `http://127.0.0.1:8010` and test the generated files in `web_demo/audio/`.
+
+### 6. Whisper Quality Check (local OpenAI-compatible endpoint)
+If you have a local transcription API on `http://127.0.0.1:5092/v1`, you can sanity-check generated audio:
+
+```bash
+curl -sS -X POST http://127.0.0.1:5092/v1/audio/transcriptions \
+  -F "file=@web_demo/audio/trabalenguas_01.wav" \
+  -F "model=whisper-1"
+```
+
+An empty/near-empty transcription usually means the TTS model is undertrained or misaligned.
+
+### 7. Quality-first Training Recipe (recommended)
+Avoid short from-scratch runs for quality checks. Use longer runs and pass checkpoints explicitly.
+
+LLM training (recommended start: pretrained weights, not from scratch):
+```bash
+CUDA_VISIBLE_DEVICES=0 python train_llm.py \
+  --input-dir <input_dir> \
+  --save-dir <save_dir> \
+  --max-steps 150000 \
+  --batch-size 64 \
+  --grad-accum-steps 1 \
+  --save-freq 5000
+```
+Monitor `train/pred_audio_unique` (logged by `train_llm.py`) to catch token collapse early.
+
+Decoder stage 1 (reconstruction):
+```bash
+CUDA_VISIBLE_DEVICES=0 python train_decoder.py \
+  --input-dir <input_dir> \
+  --save-dir <decoder_save_dir> \
+  --llm-ckpt-path <llm_checkpoint_dir_or_model.safetensors> \
+  --max-steps 120000
+```
+
+Decoder stage 2 (GAN refinement):
+```bash
+CUDA_VISIBLE_DEVICES=0 python train_decoder.py \
+  --input-dir <input_dir> \
+  --save-dir <decoder_save_dir> \
+  --llm-ckpt-path <llm_checkpoint_dir_or_model.safetensors> \
+  --decoder-ckpt-path <decoder_stage1_ckpt.pth> \
+  --use-disc \
+  --max-steps 200000 \
+  --start-step 120000
+```

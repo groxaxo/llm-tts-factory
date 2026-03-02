@@ -66,40 +66,34 @@ def generate_audio(text, llm, decoder, tokenizer, device='cuda', save_path="outp
             repetition_penalty=1.2
         )
     
-
-    # import pdb;pdb.set_trace()
-
     # 3. Process Hidden States
     # outputs.hidden_states is a tuple of tuples.
     # Outer tuple: one per generation step.
     # Inner tuple: one per layer.
     
     hidden_states_list = []
-    # We only care about the last layer
-    # outputs.hidden_states is tuple of generated steps.
-    # The first element is the Prompt (prefill) hidden states. We skip it.
-    for i, step_states in enumerate(outputs.hidden_states):
-        # step_states is tuple of layers. Get last layer.
-        # last_layer_state = step_states[-1][-1]
-        last_layer_state = step_states[-1][0, -1, :]
-        
-        # Shape: (Batch, 1, Dim)
-        # print("shape of last layer state is: ", last_layer_state.shape)
-        hidden_states_list.append(last_layer_state)
-        
-    # Concatenate along time dimension
-    # Result: (Batch, T_gen, Dim)
-    audio_hidden = torch.stack(hidden_states_list).unsqueeze(0) # (B, T, D)
+    generated_ids = outputs.sequences[:, inputs['input_ids'].shape[1]:]
+    step_hidden_states = outputs.hidden_states[1:]  # skip prefill state
+
+    for token_id, step_states in zip(generated_ids[0].tolist(), step_hidden_states):
+        if token_id == tokenizer.eos_token_id:
+            break
+        if 3 < token_id <= 8003:
+            last_layer_state = step_states[-1][0, -1, :]
+            hidden_states_list.append(last_layer_state)
+
+    if not hidden_states_list:
+        print("No audio tokens generated! Aborting.")
+        return
+
+    # Result: (B, T_audio, D)
+    audio_hidden = torch.stack(hidden_states_list).unsqueeze(0)
     
     # Ensure float32
     audio_hidden = audio_hidden.to(torch.float32)
 
     num_audio_tokens = audio_hidden.size(1)
     print(f"Generated {num_audio_tokens} audio tokens.")
-    
-    if num_audio_tokens == 0:
-        print("No audio tokens generated! Aborting.")
-        return
 
     # 4. Decode
     # Decoder expects (B, Channels, T)

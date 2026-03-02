@@ -46,6 +46,8 @@ Train the audio codec encoder and decoder:
 python codec_train.py
 ```
 
+To build dataset JSON files, both data generation scripts now default to the public `ekwek/Soprano-Encoder` checkpoint and optionally accept `--codec-ckpt-path <local_checkpoint.pt>` when you want to use a custom codec checkpoint.
+
 ### 2. LLM Stage
 Train the Qwen-based causal LLM to learn the mapping from text to audio representations:
 ```bash

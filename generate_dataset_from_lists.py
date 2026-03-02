@@ -27,6 +27,12 @@ def get_args():
         type=pathlib.Path,
         help="Directory to save new train.json and val.json"
     )
+    parser.add_argument("--codec-ckpt-path",
+        required=False,
+        default=None,
+        type=pathlib.Path,
+        help="Optional local codec checkpoint. If omitted, defaults to ekwek/Soprano-Encoder on Hugging Face."
+    )
     return parser.parse_args()
 
 def load_metadata(input_dir):
@@ -97,19 +103,21 @@ def main():
     # Load Encoder
     print("Loading Encoder...")
     encoder = Encoder()
-    speech_autoencoder_path = "/home/ubuntu/soma/ckpt/suprano/suprano_codec/codec_v2/step_30000.pt"
-    
-    print(f"Loading weights from {speech_autoencoder_path}")
-    full_ckpt = torch.load(speech_autoencoder_path, map_location='cpu')
-    
-    # Extract encoder weights
-    encoder_state_dict = {}
-    for k, v in full_ckpt.items():
-        if k.startswith("encoder."):
-            new_k = k.replace("encoder.", "", 1)
-            encoder_state_dict[new_k] = v
-            
-    encoder.load_state_dict(encoder_state_dict)
+    if args.codec_ckpt_path:
+        if not args.codec_ckpt_path.exists():
+            raise FileNotFoundError(f"Codec checkpoint not found: {args.codec_ckpt_path}")
+        print(f"Loading weights from {args.codec_ckpt_path}")
+        full_ckpt = torch.load(args.codec_ckpt_path, map_location='cpu')
+        encoder_state_dict = {}
+        for k, v in full_ckpt.items():
+            if k.startswith("encoder."):
+                new_k = k.replace("encoder.", "", 1)
+                encoder_state_dict[new_k] = v
+        encoder.load_state_dict(encoder_state_dict)
+    else:
+        from huggingface_hub import hf_hub_download
+        encoder_path = hf_hub_download(repo_id='ekwek/Soprano-Encoder', filename='encoder.pth')
+        encoder.load_state_dict(torch.load(encoder_path, map_location='cpu'))
     encoder.eval()
     print("Encoder Loaded.")
 

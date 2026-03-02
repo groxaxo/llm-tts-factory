@@ -5,6 +5,7 @@ import torchaudio
 from torch.utils.data import Dataset
 
 
+# Used by train_decoder.py for token-to-waveform alignment.
 SAMPLES_PER_TOKEN = 2048
 
 
@@ -19,7 +20,8 @@ class AudioDataset(Dataset):
 
     def __getitem__(self, idx):
         text, audio_tokens, audio_path = self.dataset[idx]
-        prompt = f"[TEXT]{text}[START]{''.join(f'[{token}]' for token in audio_tokens)}[STOP]"
+        audio_token_str = ''.join(f'[{token}]' for token in audio_tokens)
+        prompt = f"[TEXT]{text}[START]{audio_token_str}[STOP]"
 
         wav, sr = torchaudio.load(audio_path)
         if wav.shape[0] > 1:

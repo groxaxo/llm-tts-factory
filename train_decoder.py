@@ -64,7 +64,7 @@ WANDB_PROJECT = "soprano-decoder-only"
 TOKENIZER_NAME = 'ekwek/Soprano-80M'
 
 # Checkpoint paths
-LLM_CKPT_PATH = "/home/ubuntu/soma/ckpt/suprano/suprano_llm/codec_v2/v2/checkpoint-40000/model.safetensors"
+LLM_CKPT_PATH = None
 DECODER_CKPT_PATH = None
 DISC_CKPT_PATH = None
 # -----------------------------------------------------------------------------
@@ -84,6 +84,26 @@ def get_args():
     parser.add_argument("--use-disc",
         action="store_true",
         help="Whether to use discriminator and GAN losses. Defaults to False (only reconstruction loss)."
+    )
+    parser.add_argument("--tokenizer-name",
+        required=False,
+        default=TOKENIZER_NAME,
+        type=str
+    )
+    parser.add_argument("--llm-ckpt-path",
+        required=False,
+        default=LLM_CKPT_PATH,
+        type=str
+    )
+    parser.add_argument("--decoder-ckpt-path",
+        required=False,
+        default=DECODER_CKPT_PATH,
+        type=str
+    )
+    parser.add_argument("--disc-ckpt-path",
+        required=False,
+        default=DISC_CKPT_PATH,
+        type=str
     )
     return parser.parse_args()
 
@@ -330,7 +350,7 @@ def main():
 
     wandb.init(project=WANDB_PROJECT, config=vars(args))
 
-    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name)
     tokenizer.padding_side = 'right'
 
     # Initialize Mel Spectrogram Wrapper and MR-STFT Loss
@@ -338,11 +358,12 @@ def main():
     mr_stft = MultiResolutionSTFTLoss().to(DEVICE)
 
     # 1. Load LLM and Freeze
+    assert args.llm_ckpt_path is not None, "LLM checkpoint path is required. Pass --llm-ckpt-path."
     print("Loading LLM from custom checkpoint...")
-    config = AutoConfig.from_pretrained(TOKENIZER_NAME)
+    config = AutoConfig.from_pretrained(args.tokenizer_name)
     model = AutoModelForCausalLM.from_config(config)
 
-    state_dict = load_file(LLM_CKPT_PATH)
+    state_dict = load_file(args.llm_ckpt_path)
     model.load_state_dict(state_dict)
 
     model.to(torch.bfloat16).to(DEVICE)
@@ -355,12 +376,12 @@ def main():
     # 2. Decoder
     decoder = SopranoDecoder()
     # CHECK if resuming training. Load weights only if decoder_ckpt_path is not None.
-    if DECODER_CKPT_PATH:
+    if args.decoder_ckpt_path:
 
-        assert DISC_CKPT_PATH is not None, "Discriminator checkpoint path is required when resuming training."
+        assert args.disc_ckpt_path is not None, "Discriminator checkpoint path is required when resuming training."
 
         print("Loading Decoder...")
-        decoder.load_state_dict(torch.load(DECODER_CKPT_PATH, map_location='cpu'))
+        decoder.load_state_dict(torch.load(args.decoder_ckpt_path, map_location='cpu'))
     else:
         print("Training Decoder from scratch.")
 
@@ -372,8 +393,8 @@ def main():
     if args.use_disc:
         print("Initializing Discriminator...")
         discriminator = Discriminator()
-        if DISC_CKPT_PATH:
-            discriminator.load_state_dict(torch.load(DISC_CKPT_PATH, map_location='cpu'))
+        if args.disc_ckpt_path:
+            discriminator.load_state_dict(torch.load(args.disc_ckpt_path, map_location='cpu'))
         else:
             print("Training Discriminator from scratch.")
         discriminator.to(DEVICE)

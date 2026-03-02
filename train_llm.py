@@ -55,7 +55,7 @@ COOLDOWN_STEPS = int(MAX_STEPS * COOLDOWN_RATIO)
 # Options
 WANDB_PROJECT = "soprano-llm"
 TOKENIZER_NAME = 'ekwek/Soprano-80M'
-PRETRAINED_CKPT_PATH = "/home/ubuntu/soma/ckpt/suprano/suprano_llm/codec_v2/v2/checkpoint-40000/model.safetensors"
+PRETRAINED_CKPT_PATH = None
 # -----------------------------------------------------------------------------
 
 
@@ -73,6 +73,16 @@ def get_args():
     parser.add_argument("--from-scratch",
         action="store_true",
         help="If set, train from scratch using the config, instead of loading pretrained weights."
+    )
+    parser.add_argument("--tokenizer-name",
+        required=False,
+        default=TOKENIZER_NAME,
+        type=str
+    )
+    parser.add_argument("--pretrained-ckpt-path",
+        required=False,
+        default=PRETRAINED_CKPT_PATH,
+        type=str
     )
     return parser.parse_args()
 
@@ -232,20 +242,20 @@ def main():
 
     wandb.init(project=WANDB_PROJECT, config=vars(args))
 
-    tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name)
     tokenizer.padding_side = 'right' # Essential for training!
 
     # model
     if args.from_scratch:
         print("Initializing model from scratch (random weights)...")
-        config = AutoConfig.from_pretrained(TOKENIZER_NAME)
+        config = AutoConfig.from_pretrained(args.tokenizer_name)
         model = AutoModelForCausalLM.from_config(config)
     else:
         print("Loading pretrained model weights...")
-        model = AutoModelForCausalLM.from_pretrained(TOKENIZER_NAME)
+        model = AutoModelForCausalLM.from_pretrained(args.tokenizer_name)
     
-    if not args.from_scratch:
-        state_dict = load_file(PRETRAINED_CKPT_PATH)
+    if not args.from_scratch and args.pretrained_ckpt_path:
+        state_dict = load_file(args.pretrained_ckpt_path)
         model.load_state_dict(state_dict)
 
     model.to(DEVICE)

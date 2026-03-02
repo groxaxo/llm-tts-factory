@@ -56,9 +56,9 @@ def main():
         print("Loading model using custom model path!", speech_autoencoder_path)
         full_ckpt = torch.load(speech_autoencoder_path, map_location='cpu')
         encoder_state_dict = {}
-        for k,v in full_ckpt.items():
+        for k, v in full_ckpt.items():
             if k.startswith("encoder."):
-                # replace the first occurance of 'encoder.' only 
+                # replace the first occurrence of 'encoder.' only 
                 new_k = k.replace("encoder.", "", 1)
                 encoder_state_dict[new_k] = v
         encoder.load_state_dict(encoder_state_dict)

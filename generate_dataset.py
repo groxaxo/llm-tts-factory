@@ -19,7 +19,7 @@ import torch
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 
-from encoder.codec import Encoder
+from codec.encoder.codec import Encoder
 
 
 SAMPLE_RATE = 32000

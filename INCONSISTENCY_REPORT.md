@@ -31,8 +31,8 @@ This report summarizes current inconsistencies found in the repository and propo
    - Improvement: move all checkpoint/data paths to CLI flags (or env/config), with clear defaults.
 
 2. **Import path inconsistency in dataset generation scripts**
-   - `generate_dataset.py` and `generate_dataset_from_lists.py` use `from encoder.codec import Encoder` while code lives under `codec/encoder/codec.py`.
-   - Improvement: normalize imports to package-consistent paths and document execution context.
+   - Previously `generate_dataset.py` and `generate_dataset_from_lists.py` used `from encoder.codec import Encoder` while code lives under `codec/encoder/codec.py`.
+   - Status: fixed by normalizing imports to package-consistent paths.
 
 3. **Tokenizer/model identifier hardcoding**
    - `TOKENIZER_NAME` and equivalent values are fixed to `ekwek/Soprano-80M` in multiple scripts.

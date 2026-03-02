@@ -7,6 +7,16 @@ To begin with, taking inspiration from [Soprano](https://huggingface.co/ekwek/So
 I think this can be nicely setup for anybody to train llm backbone TTS models from scratch. Can spend some time to make it more modular and user friendly. Would love to hear from interested people on this!
 ---
 
+## Prerequisites
+
+- Install dependencies from `requirements.txt`.
+- Some scripts download model files from Hugging Face Hub, so make sure you have access to the referenced repos/checkpoints.
+- Training dataset JSON format is:
+  - `[text, audio_tokens, audio_path]`
+  - where `audio_tokens` is a list of codec token ids and `audio_path` is a valid waveform path.
+
+---
+
 ## Architecture
 
 The framework is divided into three core stages:

@@ -77,12 +77,14 @@ def get_args():
     parser.add_argument("--tokenizer-name",
         required=False,
         default=TOKENIZER_NAME,
-        type=str
+        type=str,
+        help="Tokenizer/model identifier used to initialize tokenizer and model config."
     )
     parser.add_argument("--pretrained-ckpt-path",
         required=False,
         default=PRETRAINED_CKPT_PATH,
-        type=str
+        type=str,
+        help="Optional safetensors checkpoint path to load after base model initialization."
     )
     return parser.parse_args()
 

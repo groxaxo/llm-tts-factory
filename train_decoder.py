@@ -88,22 +88,26 @@ def get_args():
     parser.add_argument("--tokenizer-name",
         required=False,
         default=TOKENIZER_NAME,
-        type=str
+        type=str,
+        help="Tokenizer/model identifier used to initialize tokenizer and the frozen LLM config."
     )
     parser.add_argument("--llm-ckpt-path",
         required=False,
         default=LLM_CKPT_PATH,
-        type=str
+        type=str,
+        help="Path to LLM safetensors checkpoint used to provide hidden states for decoder training."
     )
     parser.add_argument("--decoder-ckpt-path",
         required=False,
         default=DECODER_CKPT_PATH,
-        type=str
+        type=str,
+        help="Optional decoder checkpoint path for resuming decoder training."
     )
     parser.add_argument("--disc-ckpt-path",
         required=False,
         default=DISC_CKPT_PATH,
-        type=str
+        type=str,
+        help="Optional discriminator checkpoint path for resuming GAN training."
     )
     return parser.parse_args()
 
@@ -358,7 +362,7 @@ def main():
     mr_stft = MultiResolutionSTFTLoss().to(DEVICE)
 
     # 1. Load LLM and Freeze
-    assert args.llm_ckpt_path is not None, "LLM checkpoint path is required. Pass --llm-ckpt-path."
+    assert args.llm_ckpt_path is not None, "LLM checkpoint path is required. Provide it using --llm-ckpt-path <path_to_checkpoint>."
     print("Loading LLM from custom checkpoint...")
     config = AutoConfig.from_pretrained(args.tokenizer_name)
     model = AutoModelForCausalLM.from_config(config)
@@ -378,7 +382,7 @@ def main():
     # CHECK if resuming training. Load weights only if decoder_ckpt_path is not None.
     if args.decoder_ckpt_path:
 
-        assert args.disc_ckpt_path is not None, "Discriminator checkpoint path is required when resuming training."
+        assert args.disc_ckpt_path is not None, "Discriminator checkpoint path is required when resuming decoder training. Provide it using --disc-ckpt-path <path_to_checkpoint>."
 
         print("Loading Decoder...")
         decoder.load_state_dict(torch.load(args.decoder_ckpt_path, map_location='cpu'))

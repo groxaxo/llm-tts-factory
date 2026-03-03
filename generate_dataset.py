@@ -34,6 +34,11 @@ def get_args():
         default="./example_dataset",
         type=pathlib.Path
     )
+    parser.add_argument("--codec-ckpt-path",
+        required=False,
+        default=None,
+        type=pathlib.Path,
+        help="Optional local codec checkpoint. If omitted, defaults to ekwek/Soprano-Encoder on Hugging Face."
     parser.add_argument("--codec-ckpt",
         required=False,
         default=None,
@@ -46,6 +51,15 @@ def main():
     args = get_args()
     input_dir = args.input_dir
 
+    print("Loading model.")
+    encoder = Encoder()
+
+    if args.codec_ckpt_path:
+        speech_autoencoder_path = args.codec_ckpt_path
+        if not speech_autoencoder_path.exists():
+            raise FileNotFoundError(f"Codec checkpoint not found: {speech_autoencoder_path}")
+        print("Loading model using custom model path!", speech_autoencoder_path)
+        full_ckpt = torch.load(speech_autoencoder_path, map_location='cpu')
     use_custom_model = args.codec_ckpt is not None
 
     print("Loading model.")
@@ -61,17 +75,23 @@ def main():
         full_ckpt = torch.load(speech_autoencoder_path, map_location='cpu')
 
         encoder_state_dict = {}
-        for k,v in full_ckpt.items():
+        for k, v in full_ckpt.items():
             if k.startswith("encoder."):
+                # replace the first occurrence of 'encoder.' only 
                 new_k = k.replace("encoder.", "", 1)
                 encoder_state_dict[new_k] = v
-
         encoder.load_state_dict(encoder_state_dict)
+    else:
+        encoder_path = hf_hub_download(repo_id='ekwek/Soprano-Encoder', filename='encoder.pth')
+        encoder.load_state_dict(torch.load(encoder_path, map_location='cpu'))
     print("Model loaded.")
 
     print("Reading metadata.")
     files = []
-    with open(f'{input_dir}/metadata_orig.csv', encoding='utf-8') as f:
+    metadata_path = input_dir / "metadata_orig.csv"
+    if not metadata_path.exists():
+        metadata_path = input_dir / "metadata.csv"
+    with open(metadata_path, encoding='utf-8') as f:
         data = f.read().split('\n')
         for line in data:
 

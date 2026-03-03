@@ -31,18 +31,18 @@ from decoder.losses import MelSpectrogramWrapper, feature_matching_loss, discrim
 DEVICE = 'cuda:0'
 SEED = 1337
 
-MAX_LR = 2e-4  # Lower LR for GAN usually
+MAX_LR = 2e-4
 WARMUP_RATIO = 0.2
 COOLDOWN_RATIO = 0.1
 MIN_LR = 0.1 * MAX_LR
 BATCH_SIZE = 8
 GRAD_ACCUM_STEPS = 1
 SEQ_LEN = 1024
-SEGMENT_SIZE_SAMPLES = 32768  # ~1 sec (16 tokens)
+SEGMENT_SIZE_SAMPLES = 32768
 TEXT_FACTOR = 0.0 
 MAX_STEPS = 200000
-START_STEP = 141001
-BETAS = (0.8, 0.99)  # GAN betas
+START_STEP = 0
+BETAS = (0.8, 0.99)
 WEIGHT_DECAY = 0.1
 
 VAL_FREQ = 250
@@ -109,6 +109,19 @@ def get_args():
         type=str,
         help="Optional discriminator checkpoint path for resuming GAN training."
     )
+    parser.add_argument("--device", type=str, default=DEVICE)
+    parser.add_argument("--max-steps", type=int, default=MAX_STEPS)
+    parser.add_argument("--start-step", type=int, default=START_STEP)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--val-batch-size", type=int, default=16)
+    parser.add_argument("--val-freq", type=int, default=VAL_FREQ)
+    parser.add_argument("--save-freq", type=int, default=SAVE_FREQ)
+    parser.add_argument("--max-lr", type=float, default=MAX_LR)
+    parser.add_argument("--warmup-ratio", type=float, default=WARMUP_RATIO)
+    parser.add_argument("--cooldown-ratio", type=float, default=COOLDOWN_RATIO)
+    parser.add_argument("--wandb-project", type=str, default=WANDB_PROJECT)
+    parser.add_argument("--train-workers", type=int, default=4)
+    parser.add_argument("--val-workers", type=int, default=4)
     return parser.parse_args()
 
 
@@ -133,7 +146,6 @@ def collate_pack(batch_in, tokenizer):
     aud_token_lens = [x[2] for x in batch_in]
     
     tokens_batch = tokenizer(texts, padding=True, return_tensors='pt')
-    input_ids = tokens_batch['input_ids'] # (B, T)
     
     batch_tokens_list = []
     batch_audio_list = []
@@ -158,12 +170,13 @@ def collate_pack(batch_in, tokenizer):
             print(audio_indices)
         assert len(audio_indices) == num_aud_tokens, f"Audio token count mismatch: {len(audio_indices)} vs {num_aud_tokens}"
 
-        for pos, idx in enumerate(audio_indices):
-            if wav_ptr + SAMPLES_PER_TOKEN <= wav.size(0):
-                aligned_audio[pos*SAMPLES_PER_TOKEN : (pos+1)*SAMPLES_PER_TOKEN] = wav[wav_ptr : wav_ptr+SAMPLES_PER_TOKEN]
-                wav_ptr += SAMPLES_PER_TOKEN
-            else:
+        for pos, _ in enumerate(audio_indices):
+            end_ptr = min(wav_ptr + SAMPLES_PER_TOKEN, wav.size(0))
+            take = end_ptr - wav_ptr
+            if take <= 0:
                 break
+            aligned_audio[pos*SAMPLES_PER_TOKEN : pos*SAMPLES_PER_TOKEN + take] = wav[wav_ptr:end_ptr]
+            wav_ptr = end_ptr
         
         batch_tokens_list.append(tokens)
         batch_audio_list.append(aligned_audio)
@@ -177,8 +190,7 @@ def collate_pack(batch_in, tokenizer):
     x = batch_tokens[:, :-1]
     y = batch_tokens[:, 1:]
     
-    max_len_x = x.size(1)
-    gt_audio = batch_audio[:, :max_len_x * SAMPLES_PER_TOKEN]
+    gt_audio = batch_audio
 
     # Create Audio Mask (True where token is audio)
     audio_mask = (y > 3) & (y <= 8003)
@@ -337,7 +349,31 @@ def evaluate(step, val_dataloader_it, val_dataloader, model, decoder, discrimina
 
 
 def main():
+    global DEVICE, LLM_CKPT_PATH, DECODER_CKPT_PATH, DISC_CKPT_PATH
+    global MAX_STEPS, START_STEP, BATCH_SIZE, VAL_FREQ, SAVE_FREQ
+    global MAX_LR, WARMUP_RATIO, COOLDOWN_RATIO, MIN_LR, WARMUP_STEPS, COOLDOWN_STEPS
+    global WANDB_PROJECT
+
     args = get_args()
+    DEVICE = args.device
+    LLM_CKPT_PATH = args.llm_ckpt_path
+    DECODER_CKPT_PATH = args.decoder_ckpt_path
+    DISC_CKPT_PATH = args.disc_ckpt_path
+    MAX_STEPS = args.max_steps
+    START_STEP = args.start_step
+    BATCH_SIZE = args.batch_size
+    VAL_FREQ = args.val_freq
+    SAVE_FREQ = args.save_freq
+    MAX_LR = args.max_lr
+    WARMUP_RATIO = args.warmup_ratio
+    COOLDOWN_RATIO = args.cooldown_ratio
+    MIN_LR = 0.1 * MAX_LR
+    WARMUP_STEPS = int(MAX_STEPS * WARMUP_RATIO)
+    COOLDOWN_STEPS = int(MAX_STEPS * COOLDOWN_RATIO)
+    WANDB_PROJECT = args.wandb_project
+
+    if not LLM_CKPT_PATH:
+        raise ValueError("--llm-ckpt-path is required.")
 
     train_dataset_path = f'{args.input_dir}/train.json'
     val_dataset_path = f'{args.input_dir}/val.json'
@@ -367,7 +403,14 @@ def main():
     config = AutoConfig.from_pretrained(args.tokenizer_name)
     model = AutoModelForCausalLM.from_config(config)
 
-    state_dict = load_file(args.llm_ckpt_path)
+    # Resolve LLM checkpoint path: prefer CLI arg, fall back to global variable
+    llm_weights_path = args.llm_ckpt_path if getattr(args, 'llm_ckpt_path', None) else LLM_CKPT_PATH
+    if os.path.isdir(llm_weights_path):
+        llm_weights_path = os.path.join(llm_weights_path, "model.safetensors")
+    if not os.path.exists(llm_weights_path):
+        raise FileNotFoundError(f"LLM checkpoint not found: {llm_weights_path}")
+
+    state_dict = load_file(llm_weights_path)
     model.load_state_dict(state_dict)
 
     model.to(torch.bfloat16).to(DEVICE)
@@ -381,8 +424,12 @@ def main():
     decoder = SopranoDecoder()
     # CHECK if resuming training. Load weights only if decoder_ckpt_path is not None.
     if args.decoder_ckpt_path:
-
-        assert args.disc_ckpt_path is not None, "Discriminator checkpoint path is required when resuming decoder training. Provide it using --disc-ckpt-path <path_to_checkpoint>."
+        if args.use_disc and not args.disc_ckpt_path:
+            raise AssertionError("Discriminator checkpoint path is required when resuming training with discriminator.")
+        print("Loading Decoder...")
+        decoder.load_state_dict(torch.load(args.decoder_ckpt_path, map_location='cpu'))
+    else:
+        print("Training Decoder from scratch.")
 
         print("Loading Decoder...")
         decoder.load_state_dict(torch.load(args.decoder_ckpt_path, map_location='cpu'))
@@ -412,9 +459,9 @@ def main():
         dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
-        num_workers=4,
+        num_workers=args.train_workers,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=args.train_workers > 0,
         worker_init_fn=worker_seed_init,
         collate_fn=lambda batch_in: collate_pack(batch_in, tokenizer),
     )
@@ -423,11 +470,11 @@ def main():
     val_dataset = AudioDataset(val_dataset_path)
     val_dataloader = DataLoader(
         val_dataset,
-        batch_size=16,
+        batch_size=args.val_batch_size,
         shuffle=False,
-        num_workers=4,
+        num_workers=args.val_workers,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=args.val_workers > 0,
         worker_init_fn=worker_seed_init,
         collate_fn=lambda batch_in: collate_pack(batch_in, tokenizer),
     )
@@ -628,7 +675,7 @@ def main():
         }
         
         # Validation
-        if step % VAL_FREQ == 0:
+        if VAL_FREQ > 0 and step % VAL_FREQ == 0:
             val_log_dict, val_dataloader_it = evaluate(
                 step=step,
                 val_dataloader_it=val_dataloader_it,
@@ -644,7 +691,7 @@ def main():
             log_dict.update(val_log_dict)
             
         # Checkpoint Saving
-        if step > 0 and step % SAVE_FREQ == 0:
+        if SAVE_FREQ > 0 and step > 0 and step % SAVE_FREQ == 0:
             print(f"Saving checkpoint at step {step}...")
             ckpt_name_dec = f"decoder_step_{step}.pth"
             ckpt_name_disc = f"discriminator_step_{step}.pth"

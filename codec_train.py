@@ -15,7 +15,7 @@ from codec.codec_decoder.decoder import SimpleDecoder
 # -----------------------------------------------------------------------------
 # Global Configuration
 # -----------------------------------------------------------------------------
-DATASET_ROOT = "/home/ubuntu/soma/data/lj_speech/LJSpeech-1.1"
+DATASET_ROOT = "/home/op/llm-tts-factory/data/argentinian-spanish-female"
 SAMPLE_RATE = 32000
 
 BATCH_SIZE = 16
@@ -23,13 +23,13 @@ NUM_EPOCHS = 100
 LEARNING_RATE = 1e-4
 NUM_WORKERS = 8
 
-CKPT_DIR = "/home/ubuntu/soma/ckpt/suprano/suprano_codec/codec_v3"
+CKPT_DIR = "/home/op/llm-tts-factory/ckpt/codec"
 
 # Freeze params
 FREEZE_ENCODER = False
-PRETRAINED_MODEL_PATH = "/home/ubuntu/soma/ckpt/suprano/suprano_codec/codec_1/step_42000.pt"
+PRETRAINED_MODEL_PATH = None
 
-WANDB_PROJECT = "soprano-codec"
+WANDB_PROJECT = "soprano-codec-ar-female"
 USE_WANDB = True
 # -----------------------------------------------------------------------------
 
@@ -181,7 +181,7 @@ def main():
     # Here, we freeze the encoder and only train the decoder from scratch on learned encoder representation. 
     # This is to test whether the encoder has learned how to represent the audio well enough. 
     if FREEZE_ENCODER:
-        if os.path.exists(PRETRAINED_MODEL_PATH):
+        if PRETRAINED_MODEL_PATH and os.path.exists(PRETRAINED_MODEL_PATH):
             print(f"Loading model from {PRETRAINED_MODEL_PATH}")
             model.load_state_dict(torch.load(PRETRAINED_MODEL_PATH, map_location=device))
         else:

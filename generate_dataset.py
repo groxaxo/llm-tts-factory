@@ -39,6 +39,11 @@ def get_args():
         default=None,
         type=pathlib.Path,
         help="Optional local codec checkpoint. If omitted, defaults to ekwek/Soprano-Encoder on Hugging Face."
+    parser.add_argument("--codec-ckpt",
+        required=False,
+        default=None,
+        type=str,
+        help="Path to trained codec checkpoint (.pt). If not set, downloads the default encoder from HF Hub."
     )
     return parser.parse_args()
 
@@ -55,6 +60,20 @@ def main():
             raise FileNotFoundError(f"Codec checkpoint not found: {speech_autoencoder_path}")
         print("Loading model using custom model path!", speech_autoencoder_path)
         full_ckpt = torch.load(speech_autoencoder_path, map_location='cpu')
+    use_custom_model = args.codec_ckpt is not None
+
+    print("Loading model.")
+    encoder = Encoder()
+
+    if not use_custom_model:
+        encoder_path = hf_hub_download(repo_id='ekwek/Soprano-Encoder', filename='encoder.pth')
+        encoder.load_state_dict(torch.load(encoder_path, map_location='cpu'))
+    else:
+        speech_autoencoder_path = args.codec_ckpt
+        print("Loading model using custom model path!", speech_autoencoder_path)
+
+        full_ckpt = torch.load(speech_autoencoder_path, map_location='cpu')
+
         encoder_state_dict = {}
         for k, v in full_ckpt.items():
             if k.startswith("encoder."):

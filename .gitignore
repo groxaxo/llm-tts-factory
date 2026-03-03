@@ -1,6 +1,6 @@
-__pycache__/
-test.py
-*.json
+ckpt/
+data/
+wandb/
+*.pt
 *.pth
-dist/
-*.egg-info/
+*.safetensors
